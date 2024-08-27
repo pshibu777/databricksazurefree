@@ -1,0 +1,30 @@
+-- Databricks notebook source
+-- MAGIC %python
+-- MAGIC service_credential = dbutils.secrets.get(scope="azurestoragescope", key="serviceprincipleAK")
+-- MAGIC
+-- MAGIC spark.conf.set("fs.azure.account.auth.type.storagedatabrickshibu.dfs.core.windows.net", "OAuth")
+-- MAGIC spark.conf.set("fs.azure.account.oauth.provider.type.storagedatabrickshibu.dfs.core.windows.net", "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
+-- MAGIC spark.conf.set("fs.azure.account.oauth2.client.id.storagedatabrickshibu.dfs.core.windows.net", "4a0002e3-fd7f-4075-90cc-0db75c40015d")
+-- MAGIC spark.conf.set("fs.azure.account.oauth2.client.secret.storagedatabrickshibu.dfs.core.windows.net", service_credential)
+-- MAGIC spark.conf.set("fs.azure.account.oauth2.client.endpoint.storagedatabrickshibu.dfs.core.windows.net", "https://login.microsoftonline.com/c61f150e-93fa-41be-b0f6-b6f8b0c1220c/oauth2/token")
+
+-- COMMAND ----------
+
+-- MAGIC %python
+-- MAGIC import dlt
+-- MAGIC import pyspark.sql.functions as F
+-- MAGIC
+-- MAGIC @dlt.table
+-- MAGIC def azure_sql.hr.EMPLOYEE_DF_RAW_BRONZE():
+-- MAGIC     return (
+-- MAGIC         spark.readStream
+-- MAGIC         .format("cloudFiles")
+-- MAGIC         .option("cloudFiles.format", "csv")
+-- MAGIC         .option("cloudFiles.inferColumnTypes", "true")
+-- MAGIC         .load("abfss://employeedata@storagedatabrickshibu.dfs.core.windows.net/")
+-- MAGIC         .select(
+-- MAGIC             F.current_timestamp().alias("processing_time"),
+-- MAGIC             F.input_file_name().alias("source_file"),
+-- MAGIC             "*"
+-- MAGIC         )
+-- MAGIC     )
