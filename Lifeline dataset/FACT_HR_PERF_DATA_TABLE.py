@@ -1,10 +1,22 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC Read csv file into bronze dataframe
+
+# COMMAND ----------
+
+# MAGIC %run "/Workspace/Repos/pshibu777@gmail.com/databricksazurefree/Lifeline dataset/Connections"
+
+# COMMAND ----------
+
+filelocation = f"abfss://lifeline@storagedatabrickshibu.dfs.core.windows.net/"+FACT_HR_PERF_DATA_TABLE
+
+
+# COMMAND ----------
+
 FACT_HR_PERF_DATA_TABLE_BRONZE = spark.read.format("csv") \
     .option("header", "true") \
     .option("inferSchema", "true") \
-    .load("/FileStore/tables/lifeline rawdata/FACT_HR_PERF_DATA_TABLE.csv")
-
-display(FACT_HR_PERF_DATA_TABLE_BRONZE.printSchema)
+    .load(filelocation)
 
 driver = "com.microsoft.sqlserver.jdbc.SQLServerDriver"
 database_host = "sqlserverdatabricks.database.windows.net"
@@ -26,6 +38,11 @@ FACT_HR_PERF_DATA_TABLE_BRONZE.write \
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC read the bronze table from AZURE SQL database and transform the silver dataframe and load to AZURE SQL database.
+
+# COMMAND ----------
+
 FACT_HR_PERF_DATA_TABLE_SILVER_DF = (spark.read
   .format("jdbc")
   .option("driver", driver)
@@ -36,26 +53,7 @@ FACT_HR_PERF_DATA_TABLE_SILVER_DF = (spark.read
   .option("inferSchema", "true")
   .load())
 
-# COMMAND ----------
-
-FACT_HR_PERF_DATA_TABLE_SILVER = (spark.read
-  .format("jdbc")
-  .option("driver", driver)
-  .option("url", url)
-  .option("dbtable", "Lifeline.FACT_HR_PERF_DATA_TABLE_SILVER")
-  .option("user", user)
-  .option("password", password)
-  .option("inferSchema", "true")
-  .load())
-
-# COMMAND ----------
-
-delta_table_path = "/mnt/to/delta/table/FACT_HR_PERF_DATA_TABLE_SILVER"
-
-from pyspark.sql.types import StringType, IntegerType, DateType, DecimalType
-from pyspark.sql.functions import col
-
-FACT_HR_PERF_DATA_TABLE_SILVER = FACT_HR_PERF_DATA_TABLE_SILVER.withColumn("FK_DATE_ID", col("FK_DATE_ID").cast(IntegerType())) \
+FACT_HR_PERF_DATA_TABLE_SILVER_DF = FACT_HR_PERF_DATA_TABLE_SILVER_DF.withColumn("FK_DATE_ID", col("FK_DATE_ID").cast(IntegerType())) \
     .withColumn("ATTRIBUTE_GROUP", col("ATTRIBUTE_GROUP").cast(StringType())) \
     .withColumn("ATTRIBUTE", col("ATTRIBUTE").cast(StringType())) \
     .withColumn("CURR_QTR", col("CURR_QTR").cast(DecimalType(22,7))) \
@@ -63,30 +61,39 @@ FACT_HR_PERF_DATA_TABLE_SILVER = FACT_HR_PERF_DATA_TABLE_SILVER.withColumn("FK_D
     .withColumn("THRESHOLD_VALUE", col("THRESHOLD_VALUE").cast(IntegerType())) \
     .withColumn("ORDER_SEQ", col("ORDER_SEQ").cast(IntegerType()))
 
-# COMMAND ----------
-
-FACT_HR_PERF_DATA_TABLE_SILVER.write.format("delta").mode("overwrite").save(delta_table_path)
-
-from delta.tables import DeltaTable
-FACT_HR_PERF_DATA_TABLE_SILVER = DeltaTable.forPath(spark, delta_table_path)
-
-
-(FACT_HR_PERF_DATA_TABLE_SILVER.alias("FACT_HR_PERF_DATA_TABLE_SILVER_MAIN").merge(
-    FACT_HR_PERF_DATA_TABLE_SILVER_DF.alias("FACT_HR_PERF_DATA_TABLE_SILVER"), "FACT_HR_PERF_DATA_TABLE_SILVER_MAIN.ORDER_SEQ = FACT_HR_PERF_DATA_TABLE_SILVER.ORDER_SEQ") \
-        .whenMatchedUpdateAll() \
-        .whenNotMatchedInsertAll() \
-        .execute()
-        )
-
-# COMMAND ----------
-
-FACT_HR_PERF_DATA_TABLE_SILVER = FACT_HR_PERF_DATA_TABLE_SILVER.toDF()
-
-FACT_HR_PERF_DATA_TABLE_SILVER.write \
+FACT_HR_PERF_DATA_TABLE_SILVER_DF.write \
     .format("jdbc") \
     .option("driver", driver) \
     .option("url", url) \
     .option("dbtable", "Lifeline.FACT_HR_PERF_DATA_TABLE_SILVER") \
+    .option("user", user) \
+    .option("password", password) \
+    .mode("overwrite") \
+    .save()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Read the silver table from AZURE SQL database and push to gold table.
+
+# COMMAND ----------
+
+FACT_HR_PERF_DATA_TABLE_GOLD_DF = (spark.read
+  .format("jdbc")
+  .option("driver", driver)
+  .option("url", url)
+  .option("dbtable", "Lifeline.DIM_DATE_DATA_TABLE_SILVER")
+  .option("user", user)
+  .option("password", password)
+  .option("inferSchema", "true")
+  .load()
+)
+
+FACT_HR_PERF_DATA_TABLE_GOLD_DF.write \
+    .format("jdbc") \
+    .option("driver", driver) \
+    .option("url", url) \
+    .option("dbtable", "Lifeline.FACT_HR_PERF_DATA_TABLE") \
     .option("user", user) \
     .option("password", password) \
     .mode("overwrite") \

@@ -1,8 +1,17 @@
 # Databricks notebook source
+# MAGIC %run "/Workspace/Repos/pshibu777@gmail.com/databricksazurefree/Lifeline dataset/Connections"
+
+# COMMAND ----------
+
+filelocation = f"abfss://lifeline@storagedatabrickshibu.dfs.core.windows.net/"+DIM_SERVICE_PROVIDER_DATA_TABLE
+
+
+# COMMAND ----------
+
 DIM_SERVICE_PROVIDER_DATA_TABLE_BRONZE = spark.read.format("csv") \
     .option("header", "true") \
     .option("inferSchema", "true") \
-    .load("/FileStore/tables/lifeline rawdata/DIM_SERVICE_PROVIDER_DATA_TABLE.csv")
+    .load(filelocation)
 
 display(DIM_SERVICE_PROVIDER_DATA_TABLE_BRONZE.printSchema)
 
@@ -26,6 +35,18 @@ DIM_SERVICE_PROVIDER_DATA_TABLE_BRONZE.write \
 
 # COMMAND ----------
 
+DIM_KPI_DATA_TABLE_BRONZE = spark.read.format("csv") \
+    .option("header", "true") \
+    .option("inferSchema", "true") \
+    .load(filelocation)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC read the bronze table from AZURE SQL database and transform the silver dataframe and load to AZURE SQL database.
+
+# COMMAND ----------
+
 DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF = (spark.read
   .format("jdbc")
   .option("driver", driver)
@@ -41,23 +62,10 @@ display(DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF.printSchema)
 
 # COMMAND ----------
 
-delta_table_path = "/mnt/to/delta/table/DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER"
-
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER = (spark.read
-  .format("jdbc")
-  .option("driver", driver)
-  .option("url", url)
-  .option("dbtable", "Lifeline.DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER")
-  .option("user", user)
-  .option("password", password)
-  .option("inferSchema", "true")
-  .load()
-)
-
 from pyspark.sql.types import StringType, IntegerType, DateType
 from pyspark.sql.functions import col
 
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER = DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.withColumn("PK_SERVICE_PROVIDER_ID", col("PK_SERVICE_PROVIDER_ID").cast(IntegerType())) \
+DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF = DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF.withColumn("PK_SERVICE_PROVIDER_ID", col("PK_SERVICE_PROVIDER_ID").cast(IntegerType())) \
     .withColumn("SERVICE_PROVIDER_TYPE", col("SERVICE_PROVIDER_TYPE").cast(StringType())) \
     .withColumn("SERVICE_PROVIDER_NAME", col("SERVICE_PROVIDER_NAME").cast(StringType())) \
     .withColumn("SERVICE_PROVIDER_RANK", col("SERVICE_PROVIDER_RANK").cast(IntegerType())) \
@@ -82,26 +90,39 @@ DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER = DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.
 
 # COMMAND ----------
 
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.write.format("delta").mode("overwrite").save(delta_table_path)
-
-from delta.tables import DeltaTable
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER = DeltaTable.forPath(spark, delta_table_path)
-
-(DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.alias("DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_MAIN") \
-    .merge(DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF.alias("DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER"), "DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_MAIN.PK_SERVICE_PROVIDER_ID = DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.PK_SERVICE_PROVIDER_ID") \
-        .whenMatchedUpdateAll() \
-        .whenNotMatchedInsertAll() \
-        .execute() \
-        )
-
-# COMMAND ----------
-
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER = DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.toDF()
-DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER.write \
+DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER_DF.write \
     .format("jdbc") \
     .option("driver", driver) \
     .option("url", url) \
     .option("dbtable", "Lifeline.DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER") \
+    .option("user", user) \
+    .option("password", password) \
+    .mode("overwrite") \
+    .save()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Read the silver table from AZURE SQL database and push to gold table.
+
+# COMMAND ----------
+
+DIM_SERVICE_PROVIDER_DATA_TABLE_GOLD_DF = (spark.read
+  .format("jdbc")
+  .option("driver", driver)
+  .option("url", url)
+  .option("dbtable", "Lifeline.DIM_SERVICE_PROVIDER_DATA_TABLE_SILVER")
+  .option("user", user)
+  .option("password", password)
+  .option("inferSchema", "true")
+  .load()
+)
+
+DIM_SERVICE_PROVIDER_DATA_TABLE_GOLD_DF.write \
+    .format("jdbc") \
+    .option("driver", driver) \
+    .option("url", url) \
+    .option("dbtable", "Lifeline.DIM_SERVICE_PROVIDER_DATA_TABLE") \
     .option("user", user) \
     .option("password", password) \
     .mode("overwrite") \
